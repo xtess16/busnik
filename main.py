@@ -1,7 +1,7 @@
 import getpass
 
 import core
-import vk_bot
+from vk_api_shell import vk_bot
 import keyring
 
 spider = core.Spider()

@@ -1,2 +1,0 @@
-class RouteByUidNotFound(Exception):
-    pass
