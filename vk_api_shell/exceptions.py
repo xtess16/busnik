@@ -1,0 +1,2 @@
+class PayloadTypeError(Exception):
+    pass

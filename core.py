@@ -4,19 +4,17 @@ import re
 import bs4
 import requests
 
-import appp_shell.routes
-import appp_shell.stations
+from appp_shell import BusRoutes
+from appp_shell import BusStations
 import config
 
 
 class Spider:
     def __init__(self):
         self._requests_session = requests.Session()
-        self._bus_routes = appp_shell.routes.BusRoutes()
+        self._all_stations = BusStations()
+        self._bus_routes = BusRoutes(self._all_stations)
         self.__download_info()
-        self._independent_stations = appp_shell.stations.IndependentStations(
-            self._bus_routes
-        )
 
     @property
     def routes(self):
@@ -24,10 +22,10 @@ class Spider:
 
     @property
     def stations(self):
-        return self._independent_stations
+        return self._all_stations
 
     def __download_info(self):
-        print('Download info about routes and stations')
+        print('Скачивание информации о маршрутах и станциях')
         link: str = config.route_selection_link
         params: dict = config.route_selection_params
         response = self._requests_session.get(link, params=params)

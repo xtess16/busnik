@@ -7,44 +7,42 @@ from typing import Union
 import bs4
 import requests
 
-from appp_shell.stations import BusStations
-from . import config
-from . import exceptions
-
+from . import stations as stations_module
+from . import exceptions, config
 
 logger = logging.getLogger(__name__)
 
 
 class BusRoutes:
-    def __init__(self):
+    def __init__(self, all_stations: stations_module.BusStations):
         logger.info(f'{self.__class__.__name__} инициализируется')
         self._bus_routes: list[BusRouteItem] = []
-        self._bus_routes_rids: list[str] = []
+        self._all_stations = all_stations
         logger.info(f'{self.__class__.__name__} успешно инициализирован')
 
     def append(self, rid: str) -> None:
         if rid not in self.get_all_rids():
-            bus_route = BusRouteItem(rid)
+            bus_route = BusRouteItem(rid, self._all_stations)
             self._bus_routes.append(bus_route)
-            self._bus_routes_rids.append(rid)
 
     def remove(self, rid: str) -> None:
         try:
-            remove_index = self._bus_routes_rids.index(rid)
+            remove_index = self.get_all_rids().index(rid)
         except IndexError:
             pass
         else:
             self._bus_routes.pop(remove_index)
-            self._bus_routes_rids.pop(remove_index)
+            # TODO удалить из станций
 
     def get_all(self) -> list[BusRouteItem]:
         return self._bus_routes
 
     def get_all_rids(self) -> list[str]:
-        return self._bus_routes_rids
+        rids = [i.rid for i in self._bus_routes]
+        return rids
 
     def get_all_names(self) -> list[str]:
-        routes = list(map(lambda x: x.name, self._bus_routes))
+        routes = [i.name for i in self._bus_routes]
         return routes
 
     def __getitem__(self, item) -> BusRouteItem:
@@ -52,27 +50,32 @@ class BusRoutes:
             return self._bus_routes[item]
         else:
             for route in self._bus_routes:
-                if route.name.casefold() == item.casefold():
+                if route.rid == item:
                     return route
+
+    def __len__(self):
+        return len(self._bus_routes)
 
     def __repr__(self):
         return f'{self.__class__.__name__}({self._bus_routes})'
 
 
 class BusRouteItem:
-    def __init__(self, rid: str):
+    def __init__(self, rid: str, all_stations: stations_module.BusStations):
         logger.info('{}(rid={}) инициализируется'.format(
             self.__class__.__name__, rid
         ))
         self.__route_page: Union[bs4.BeautifulSoup, None] = None
-        self._stations: Union[BusStations, None] = None
 
-        self._rid: str = rid
+        self._rid = rid
+        self._all_stations = all_stations
+        self.__my_stations = []
         self._requests_session = requests.Session()
         self.__download_page_flag = threading.Event()
-        threading.Thread(
-            target=self.download_page_by_rid, args=(rid,)
-        ).start()
+        # threading.Thread(
+        #     target=self.download_page_by_rid, args=(rid,)
+        # ).start()
+        self.download_page_by_rid(rid)
         logger.info('{}(rid={}) инициализирован'.format(
             self.__class__.__name__, rid
         ))
@@ -88,8 +91,10 @@ class BusRouteItem:
         route_name = soup.select(route_name_css)
         if route_name:
             self.__route_page = soup
-            self._stations = BusStations(self.__route_page)
             self.__download_page_flag.set()
+            self._all_stations.append_stations_by_route_page(
+                soup, route=self
+            )
         else:
             logger.debug('rid={} не существует'.format(rid))
             raise exceptions.RouteByRidNotFound
@@ -119,10 +124,17 @@ class BusRouteItem:
         return self.get_bus_info()[0]
 
     @property
-    def stations(self) -> BusStations:
+    def stations(self) -> list[stations_module.BusStationItem]:
         self.__download_page_flag.wait()
-        return self._stations
+        return self.__my_stations
+
+    def append_my_station(self, station):
+        self.__my_stations.append(station)
+
+    def remove_my_station(self, station):
+        self.__my_stations.remove(station)
 
     def __repr__(self):
         classname = self.__class__.__name__
-        return f'{classname}(rid="{self.rid}", name="{self.name}")'
+        return f"{classname}(rid='{self.rid}', name='{self.name}', " +\
+            f' stations={[x.name for x in self.stations]})'

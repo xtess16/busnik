@@ -10,7 +10,6 @@ route_stations_params = {
 }
 
 station_link = 'http://appp29.ru/mobile/{}'
-
 route_name_reg_expr = re.compile(r'№\s*([\d\w]+).*?\((.+)\s+-\s+(.+)\)', re.I)
 
 replace_station_names_dictionary = {
@@ -22,8 +21,10 @@ replace_station_names_dictionary = {
 }
 
 
-def replace_station_names(name):
+def replace_station_name(name):
     return replace_station_names_dictionary.get(name, name)
 
 
 bus_stations_csv_path = os.path.join('data', 'bus_stations.csv')
+
+reg_expr_for_stid = re.compile(r'stid=(\d+)')
