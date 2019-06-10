@@ -3,7 +3,8 @@ from __future__ import annotations
 import csv
 import logging
 import os
-from typing import Union
+import threading
+from typing import Union, Optional, Tuple
 
 import bs4
 import requests
@@ -12,6 +13,7 @@ from haversine import haversine, Unit
 
 from . import exceptions, config
 from . import routes as routes_module
+from db_classes import StationsCoord
 
 logger = logging.getLogger(__name__)
 if os.path.exists(config.bus_stations_csv_path):
@@ -22,9 +24,11 @@ else:
 
 
 class BusStations:
-    def __init__(self):
+    def __init__(self, session):
         logger.info(self.__class__.__name__ + ' инициализируется')
+        self.__session = session
         self._bus_stations: list[BusStationItem] = []
+        self.__append_stations_locker = threading.Lock()
         logger.info(self.__class__.__name__ + ' инициализирован')
 
     @property
@@ -43,10 +47,13 @@ class BusStations:
 
     def append_stations_by_route_page(
             self, route_page: bs4.BeautifulSoup,
-            route: Union[routes_module.BusRouteItem, None] = None):
+            route: Optional[routes_module.BusRouteItem] = None):
         css = 'fieldset a[href*="page=forecasts"]'
         stations = []
-        # TODO если все станции имеют остановку A(которая лежит на одной из сторон)
+        self.__append_stations_locker.acquire()
+        cursor = self.__session()
+        # TODO если все станции имеют
+        # остановку A(которая лежит на одной из сторон)
         # то все станции из сета лежат на этой стороне
         for station_html in route_page.select(css):
             sid = config.reg_expr_for_stid.search(
@@ -61,11 +68,26 @@ class BusStations:
                 'name': name
             })
             if sid not in self:
+                coords = cursor.query(
+                    StationsCoord.latitude, StationsCoord.longitude
+                ).filter(StationsCoord.sid == sid).one_or_none()
                 station_item = \
                     BusStationItem(
                         link=config.station_link.format(station_html['href']),
-                        name=name
+                        name=name,
+                        coords=coords
                     )
+                station_db = cursor.query(StationsCoord).filter(
+                    StationsCoord.sid == sid).one_or_none()
+                if station_db is not None:
+                    station_db.latitude, station_db.longitude = \
+                        station_item.coords
+                elif station_item.coords is not None:
+                    cursor.add(
+                        StationsCoord(name, sid, *station_item.coords)
+                    )
+                cursor.commit()
+                cursor.close()
                 if route is not None:
                     station_item.append_route(route)
                     route.append_my_station(station_item)
@@ -73,13 +95,12 @@ class BusStations:
             else:
                 self[sid].append_route(route)
                 route.append_my_station(self[sid])
-        if '5' == route.rid:
-            pass
         for i in range(len(stations)-1):
             if stations[i] is not None and stations[i+1] is not None:
                 sid = stations[i]['sid']
                 next_station_sid = stations[i+1]['sid']
                 self[sid].append_next_station(self[next_station_sid])
+        self.__append_stations_locker.release()
 
     def all_sids(self) -> list[str]:
         return [i.sid for i in self.stations]
@@ -111,11 +132,6 @@ class BusStations:
         else:
             return list(map(lambda x: x[0], nearest_stations))
 
-    def all_stations_by_subname(self, subname):
-        stations = [
-            station for station in self.stations if subname in station.name
-        ]
-
     def __len__(self):
         return len(self._bus_stations)
 
@@ -139,7 +155,8 @@ class BusStations:
 class BusStationItem:
     __COORDS_NOT_FOUND = 'coords_not_found'
 
-    def __init__(self, link: str, name: str):
+    def __init__(self, link: str, name: str,
+                 coords: Optional[Tuple[float, float]] = None):
         logger.info('{}(name="{}") инициализируется'.format(
             self.__class__.__name__, name
         ))
@@ -151,8 +168,9 @@ class BusStationItem:
         self._next_stations: list[BusStationItem] = []
         self._routes: list[routes_module.BusRouteItem] = []
 
-        self._coords: Union[tuple[float, float], None] = None
-        self.calculate_coords_from_stations_csv(STATIONS_CSV)
+        self._coords = coords
+        if coords is None:
+            self.calculate_coords_from_stations_csv(STATIONS_CSV)
         logger.info('{}(name="{}") инициализирован'.format(
             self.__class__.__name__, name
         ))
@@ -218,7 +236,7 @@ class BusStationItem:
         return schedule_table
 
     def calculate_coords_from_stations_csv(
-            self, stations_csv: Union[list[list], None]):
+            self, stations_csv: Optional[list[list]]):
         if stations_csv is None:
             raise exceptions.StationsCsvNotFound
         max_equals = []

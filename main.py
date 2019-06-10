@@ -1,9 +1,10 @@
 import getpass
+import traceback
 
 import core
 from vk_api_shell import vk_bot
 import keyring
-
+from sqlalchemy.orm import session
 spider = core.Spider()
 
 bot = vk_bot.Bot(spider)
@@ -17,5 +18,12 @@ while True:
         )
     else:
         break
-
-bot.longpoll_listen()
+while True:
+    try:
+        bot.longpoll_listen()
+    except KeyboardInterrupt:
+        session.close_all_sessions()
+        break
+    except Exception as e:
+        print(traceback.format_exc())
+        break

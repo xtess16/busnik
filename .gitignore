@@ -1,3 +1,5 @@
 .idea/
 __pycache__/
 logs/
+.mypy_cache/
+data/main_db.sqlite

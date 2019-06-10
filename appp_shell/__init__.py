@@ -1,5 +1,4 @@
 import logging.handlers
-import logging.handlers
 import os
 
 from .routes import BusRoutes, BusRouteItem

@@ -4,17 +4,29 @@ import re
 import bs4
 import requests
 
+import db_classes
 from appp_shell import BusRoutes
 from appp_shell import BusStations
 import config
+from sqlalchemy.orm import sessionmaker
 
 
 class Spider:
     def __init__(self):
         self._requests_session = requests.Session()
-        self._all_stations = BusStations()
+        self.__db_engine = db_classes.get_db_engine(config.path_to_db)
+        self.__db_session = sessionmaker(self.__db_engine)
+        self._all_stations = BusStations(self.__db_session)
         self._bus_routes = BusRoutes(self._all_stations)
         self.__download_info()
+
+    @property
+    def db_engine(self):
+        return self.__db_engine
+
+    @property
+    def db_session(self):
+        return self.__db_session
 
     @property
     def routes(self):

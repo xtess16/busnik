@@ -72,10 +72,10 @@ class BusRouteItem:
         self.__my_stations = []
         self._requests_session = requests.Session()
         self.__download_page_flag = threading.Event()
-        # threading.Thread(
-        #     target=self.download_page_by_rid, args=(rid,)
-        # ).start()
-        self.download_page_by_rid(rid)
+        threading.Thread(
+            target=self.download_page_by_rid, args=(rid,)
+        ).start()
+        #self.download_page_by_rid(rid)
         logger.info('{}(rid={}) инициализирован'.format(
             self.__class__.__name__, rid
         ))
