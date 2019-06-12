@@ -1,6 +1,8 @@
+"""
+    :author: xtess16
+"""
 from __future__ import annotations
 
-import json
 import logging
 import traceback
 from typing import Optional
@@ -9,70 +11,82 @@ import requests
 import vk_api
 from vk_api.bot_longpoll import VkBotLongPoll, VkBotEventType
 from vk_api.bot_longpoll import VkBotMessageEvent
-from vk_api.utils import sjson_dumps
 
 from . import menu, config
 
-logger = logging.getLogger(__name__)
+LOGGER = logging.getLogger(__name__)
 
 
 class Bot:
+    """
+        Класс - "скелет" бота, авторизовывается в вк, отлавливает сообщение
+        через лонгпулл и передает их на обработку классу Menu
+    """
+
     def __init__(self, spider):
-        logger.info(self.__class__.__name__ + ' инициализируется')
+        """
+            Инициализатор
+        :param spider: Класс, соединяющий бота в вк и парсера,
+            через него происходит взаимодействие со станциями и маршрутами
+        """
+        LOGGER.info('%s инициализируется', self.__class__.__name__)
         self.__spider = spider
         self.__vk: Optional[vk_api.VkApi] = None
         self.__longpoll: Optional[VkBotLongPoll] = None
         self.__menu_handler: menu.Menu = menu.Menu(self.__spider)
-        logger.info(self.__class__.__name__ + ' инициализирован')
+        LOGGER.info('%s инициализирован', self.__class__.__name__)
 
     def auth(self, token: str) -> bool:
-        logger.info('Авторизация')
+        """
+            Авторизация бота в вк
+        :param token: Токен для авторизации
+        :return: True/False в зависимости от успешности авторизации
+        """
+
+        LOGGER.info('Авторизация')
         try:
             self.__vk = vk_api.VkApi(token=token)
-            self.__longpoll = VkBotLongPoll(self.__vk, config.bot_group_id)
-        except vk_api.exceptions.ApiError as e:
+            self.__longpoll = VkBotLongPoll(self.__vk, config.BOT_GROUP_ID)
+        except vk_api.exceptions.ApiError as error:
             # Авторизация не удалась
-            if '[5]' in str(e):
-                logger.error(
-                    'Авторизация не удалась: ' + str(e)
-                )
-                return False
+            if '[5]' in str(error):
+                LOGGER.error('Авторизация не удалась: %s', str(error))
             else:
-                logger.critical(
-                    'Неизвестная ошибка: ' + traceback.format_exc()
-                )
+                LOGGER.critical(
+                    'Неизвестная ошибка: %s', traceback.format_exc())
+            return False
         except Exception:
-            logger.critical(
-                'Неизвестная ошибка: ' + traceback.format_exc()
-            )
+            LOGGER.critical('Неизвестная ошибка: %s', traceback.format_exc())
+            return False
         else:
-            logger.info('Авторизован')
+            LOGGER.info('Авторизован')
             print('Авторизован')
             return True
 
     def longpoll_listen(self) -> None:
-        logger.info('Подключение к лонгпулл серверу')
+        """
+            Прослушивание лонгпулл
+        """
+        LOGGER.info('Подключение к лонгпулл серверу')
         while True:
             try:
                 for event in self.__longpoll.listen():
                     if event.type == VkBotEventType.MESSAGE_NEW:
                         self._new_message(event)
-            except requests.exceptions.ReadTimeout as e:
-                logger.warning(str(e))
+            except requests.exceptions.ReadTimeout as error:
+                LOGGER.warning(str(error))
 
     def _new_message(self, event: VkBotMessageEvent) -> None:
-        logger.debug('Новое сообщение ' + str(event))
+        """
+            Получение нового сообщения от лонгпулла
+        :param event: Событие, полученное от лонгпулла
+        """
+        LOGGER.debug('Новое сообщение %s', str(event))
         if event.obj.geo is not None:
             context: dict = self.__menu_handler.got_message_with_geo(event)
         elif event.obj.payload is not None:
             context: dict = self.__menu_handler.got_message_with_payload(event)
         else:
-            context = self.__menu_handler.got_unknown_message(event)
+            context: dict = self.__menu_handler.got_unknown_message(event)
         if context:
             self.__vk.method('messages.send', context)
-
-    def __delete_all_empty_line_from_keyboard(self, keyboard: str) -> dict:
-        keyboard: dict = json.loads(keyboard)
-        while [] in keyboard['buttons']:
-            keyboard['buttons'].remove([])
-        return sjson_dumps(keyboard)

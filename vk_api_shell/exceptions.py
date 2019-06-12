@@ -1,2 +1,9 @@
+"""
+    :author: xtess16
+"""
+
+
 class PayloadTypeError(Exception):
-    pass
+    """
+        Неизвестный тип payload
+    """

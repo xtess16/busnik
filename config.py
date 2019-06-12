@@ -1,10 +1,12 @@
+"""
+    :author: xtess16
+"""
 import os
 
-
-route_selection_link = 'http://appp29.ru/mobile/op.php'
-route_selection_params = {
+ROUTE_SELECTION_LINK = 'http://appp29.ru/mobile/op.php'
+ROUTE_SELECTION_PARAMS = {
     'city': 'arhangelsk',
     'page': 'routes',
     'rt': 'А'
 }
-path_to_db = os.path.join('data', 'main_db.sqlite')
+PATH_TO_DB = os.path.join('data', 'main_db.sqlite')

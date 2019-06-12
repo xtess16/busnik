@@ -1,3 +1,6 @@
+"""
+    :author: xtess16
+"""
 import logging.handlers
 import os
 
@@ -8,23 +11,23 @@ LOG_FOLDER = 'logs'
 if not os.path.exists(LOG_FOLDER):
     os.mkdir(LOG_FOLDER)
 
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+LOGGER = logging.getLogger(__name__)
+LOGGER.setLevel(logging.DEBUG)
 
 
-logger_file_handler = logging.handlers.TimedRotatingFileHandler(
+LOGGER_FILE_HANDLER = logging.handlers.TimedRotatingFileHandler(
     os.path.join(LOG_FOLDER, 'main_log'), when='midnight'
 )
-logger_file_handler.setLevel(logging.DEBUG)
-logger_file_handler.suffix = '%d-%m-%Y'
-logger_file_handler.setFormatter(logging.Formatter(
+LOGGER_FILE_HANDLER.setLevel(logging.DEBUG)
+LOGGER_FILE_HANDLER.suffix = '%d-%m-%Y'
+LOGGER_FILE_HANDLER.setFormatter(logging.Formatter(
     '[%(levelname)s]  (%(asctime)s)  ' +
     '%(filename)s(%(name)s):%(funcName)s:%(lineno)d' +
     ' -- Thread: %(threadName)s\n\t%(message)s'
 ))
-logger.addHandler(logger_file_handler)
+LOGGER.addHandler(LOGGER_FILE_HANDLER)
 
-logger_stream_handler = logging.StreamHandler()
-logger_stream_handler.setLevel(logging.ERROR)
+LOGGER_STREAM_HANDLER = logging.StreamHandler()
+LOGGER_STREAM_HANDLER.setLevel(logging.ERROR)
 
-logger.addHandler(logger_stream_handler)
+LOGGER.addHandler(LOGGER_STREAM_HANDLER)

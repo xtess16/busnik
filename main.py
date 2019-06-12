@@ -1,17 +1,21 @@
+"""
+    :author: xtess16
+"""
 import getpass
 import traceback
 
-import core
-from vk_api_shell import vk_bot
 import keyring
 from sqlalchemy.orm import session
-spider = core.Spider()
 
-bot = vk_bot.Bot(spider)
+import core
+from vk_api_shell import vk_bot
+
+SPIDER = core.Spider()
+BOT = vk_bot.Bot(SPIDER)
 
 while True:
-    token = keyring.get_password('busnik.group_token', getpass.getuser())
-    if token is None or not bot.auth(token):
+    TOKEN = keyring.get_password('busnik.group_token', getpass.getuser())
+    if TOKEN is None or not BOT.auth(TOKEN):
         keyring.set_password(
             'busnik.group_token',
             getpass.getuser(), getpass.getpass('Group token: ')
@@ -20,10 +24,10 @@ while True:
         break
 while True:
     try:
-        bot.longpoll_listen()
+        BOT.longpoll_listen()
     except KeyboardInterrupt:
         session.close_all_sessions()
         break
-    except Exception as e:
+    except Exception:
         print(traceback.format_exc())
-        break
+        SPIDER.db_session().rollback()

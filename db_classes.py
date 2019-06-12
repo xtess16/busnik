@@ -1,7 +1,9 @@
+"""
+    :author: xtess16
+"""
 from __future__ import annotations
 
-import json
-from typing import Union
+from typing import List
 
 import sqlalchemy
 from sqlalchemy import String, Integer, Column, Float, JSON
@@ -11,6 +13,13 @@ Base = declarative_base()
 
 
 class StationsCoord(Base):
+    """
+        Таблица содежращая в себе:
+            name - имя остановки
+            sid - уникальный идентификатор
+            latitude - ширата
+            longitude - долгота
+    """
     __tablename__ = 'stations_coord'
     id = Column(Integer, primary_key=True)
     name = Column(String)
@@ -19,6 +28,13 @@ class StationsCoord(Base):
     longitude = Column(Float)
 
     def __init__(self, name: str, sid: str, lat: float, long: float):
+        """
+            Инициализтор
+        :param name: Имя остановки
+        :param sid: Уникальный идентификатор
+        :param lat: Широта
+        :param long: Долгота
+        """
         self.name = name
         self.sid = sid
         self.latitude = lat
@@ -31,33 +47,23 @@ class StationsCoord(Base):
         )
 
 
-class UsersActions(Base):
-    __tablename__ = 'users_actions'
-    id = Column(Integer, primary_key=True)
-    peer_id = Column(Integer)
-    action_type = Column(String)
-    data = Column(String)
-
-    def __init__(self, peer_id: int, action_type: str,
-                 data: Union[dict, list]):
-        self.peer_id = peer_id
-        self.action_type = action_type
-        self.data = json.dumps(data)
-
-    def __repr__(self):
-        return '{classname}({peer_id}, {action_type}, {data)'.format(
-            classname=self.__class__.__name__, peer_id=self.peer_id,
-            action_type=self.action_type, data=self.data
-        )
-
-
 class RecentStations(Base):
+    """
+        Таблица последних остановок, расписание которых получал пользователь
+            peer_id - id пользователя
+            stations - список sid остановок
+    """
     __tablename__ = 'recent_stations_of_users'
     id = Column(Integer, primary_key=True)
     peer_id = Column(Integer, unique=True)
     stations = Column(JSON)
 
-    def __init__(self, peer_id: int, stations: list[str]):
+    def __init__(self, peer_id: int, stations: List[str]):
+        """
+            Инициализатор
+        :param peer_id: id пользователя
+        :param stations: Список остановок
+        """
         self.peer_id = peer_id
         self.stations = stations
 
@@ -66,7 +72,12 @@ class RecentStations(Base):
             self.__class__.__name__, self.peer_id, self.stations
         )
 
-    def add(self, sid):
+    def add(self, sid: str) -> None:
+        """
+            Добавляет остановку в список последних, при этом,
+            убирая самую старую
+        :param sid: Уникальный идентификатор остановки
+        """
         tmp_stations = self.stations[:]
         if sid in tmp_stations:
             tmp_stations.remove(sid)
@@ -77,12 +88,22 @@ class RecentStations(Base):
 
 
 class PopularStations(Base):
+    """
+        Таблица самых популярных остановок среди всех пользователей
+            sid - уникальный идентификатор остановки
+            call_count - количество вызовов
+    """
     __tablename__ = 'popular_stations'
     id = Column(Integer, primary_key=True)
     sid = Column(String(5))
     call_count = Column(Integer)
 
     def __init__(self, sid: str, call_count: int):
+        """
+            Инициализатор
+        :param sid: Уникальный идентификатор остановки
+        :param call_count: Количество вызовов
+        """
         self.sid = sid
         self.call_count = call_count
 
@@ -92,7 +113,12 @@ class PopularStations(Base):
         )
 
 
-def get_db_engine(path_to_db):
+def get_db_engine(path_to_db: str) -> sqlalchemy.engine.base.Engine:
+    """
+        Создание engine для работы с БД
+    :param path_to_db: Путь к базе данных
+    :return: engine объект для работы с БД
+    """
     engine = sqlalchemy.create_engine('sqlite:///'+path_to_db)
     Base.metadata.create_all(engine)
     return engine

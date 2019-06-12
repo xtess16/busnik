@@ -1,6 +1,15 @@
+"""
+    :author: xtess16
+"""
+
+
 class RouteByRidNotFound(Exception):
-    pass
+    """
+        Возбуждается когда не найден маршрут по уникальному идентификатору
+    """
 
 
 class StationsCsvNotFound(Exception):
-    pass
+    """
+        Возбуждается, когда не получен csv файл остановок с координатами
+    """

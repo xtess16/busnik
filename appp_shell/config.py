@@ -1,18 +1,21 @@
+"""
+    :author: xtess16
+"""
 import os
 import re
 
-route_stations_link = 'http://appp29.ru/mobile/op.php'
-route_stations_params = {
+ROUTE_STATIONS_LINK = 'http://appp29.ru/mobile/op.php'
+ROUTE_STATIONS_PARAMS = {
     'city': 'arhangelsk',
     'page': 'stations',
     'rid': None,
     'rt': 'A'
 }
 
-station_link = 'http://appp29.ru/mobile/{}'
-route_name_reg_expr = re.compile(r'№\s*([\d\w]+).*?\((.+)\s+-\s+(.+)\)', re.I)
+STATION_LINK = 'http://appp29.ru/mobile/{}'
+ROUTE_NAME_REG_EXPR = re.compile(r'№\s*([\d\w]+).*?\((.+)\s+-\s+(.+)\)', re.I)
 
-replace_station_names_dictionary = {
+REPLACE_STATION_NAMES_DICTIONARY = {
     'Урицкого-Обводный': 'пр. Обводный канал',
     'Поликлиника': 'Поликлиника №3',
     'ул. Розы Люксенбург': 'ул. Розы Люксембург',
@@ -21,10 +24,14 @@ replace_station_names_dictionary = {
 }
 
 
-def replace_station_name(name):
-    return replace_station_names_dictionary.get(name, name)
+def replace_station_name(name: str) -> str:
+    """
+        Получение имени, измененного в соответствие со словарем
+    :param name:
+    """
+    return REPLACE_STATION_NAMES_DICTIONARY.get(name, name)
 
 
-bus_stations_csv_path = os.path.join('data', 'bus_stations.csv')
+BUS_STATIONS_CSV_PATH = os.path.join('data', 'bus_stations.csv')
 
-reg_expr_for_stid = re.compile(r'stid=(\d+)')
+REG_EXPR_FOR_STID = re.compile(r'stid=(\d+)')

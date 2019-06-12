@@ -1,43 +1,62 @@
+"""
+    :author: xtess16
+"""
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import time
 from functools import wraps
-from typing import Optional
+from typing import Optional, Any, Dict, List, Tuple, Callable
 
 from vk_api.bot_longpoll import VkBotMessageEvent
 from vk_api.keyboard import VkKeyboardColor, VkKeyboard
 
 from appp_shell import BusStationItem
-from db_classes import UsersActions, PopularStations, RecentStations
+from core import Spider
+from db_classes import PopularStations, RecentStations
 from . import config
 
-logger = logging.getLogger(__name__)
-payload_handlers = {}
+LOGGER = logging.getLogger(__name__)
+PAYLOAD_HANDLERS = {}
+
+ContextType = Dict[str, Any]
 
 
-def hash_func(func):
-    return hex(hash(func.__name__))[2:]
+def hash_func(func: Callable) -> str:
+    """
+        Кодирует имя функции в md5, для дальнейшего вызова через handler
+    :param func: Функция, имя которой надо закодировать
+    :return: md5 хэш имени функции
+    """
+    _hash = hashlib.md5(func.__name__.encode()).hexdigest()
+    return _hash
 
 
-def show_elapsed_time(text=None):
-    def decorator(func):
+def show_elapsed_time(text: Optional[str] = None) -> Callable:
+    """
+        Декоратор для подсчета времени работы функции
+    :param text: Дополнительный текст для записи в лог
+    """
+    def decorator(func: Callable):
         @wraps(func)
         def wrapper(*args, **kwargs):
             start = time.monotonic()
             res = func(*args, **kwargs)
             finish = time.monotonic() - start
-            logger.debug('{} - {} sec'.format(
-                text or func.__name__, finish
-            ))
+            LOGGER.debug('%s - %s sec', text or func.__name__, finish)
             return res
         return wrapper
     return decorator
 
 
-def payload_handler(func):
-    payload_handlers[hash_func(func)] = func.__name__
+def payload_handler(func: Callable) -> Callable:
+    """
+        Декоратор, нужен для передачи handler-функции в payload vk api
+    :param func: Функция handler - явялется обработчиком событий с payload
+    """
+    PAYLOAD_HANDLERS[hash_func(func)] = func.__name__
     @wraps(func)
     def wrapper(*args, **kwargs):
         return func(*args, **kwargs)
@@ -45,6 +64,12 @@ def payload_handler(func):
 
 
 def context_handler(add_menu_button=False):
+    """
+        Декоратор, производит необходимые операции с результатами работы
+        функций, которые возвращают context для отсылки vk api
+    :param add_menu_button: Если True, добавляет к клавиатуре кнопку для
+        выхода в главное меню
+    """
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -65,19 +90,38 @@ def context_handler(add_menu_button=False):
 
 
 class Menu:
-    def __init__(self, spider):
+    """
+        Класс содержит в себе методы для обработки запросов,
+        отправляемых пользователем
+    """
+
+    def __init__(self, spider: Spider):
+        """
+            Инициализатор
+        :param spider: Класс, соединяющий бота в вк и парсера,
+            через него происходит взаимодействие со станциями и маршрутами
+        """
         self.__spider = spider
 
     @show_elapsed_time('Обработка гео')
     @context_handler(add_menu_button=True)
-    def got_message_with_geo(self, event: VkBotMessageEvent) -> dict:
-        logger.debug('Сообщение с геопозицией')
+    def got_message_with_geo(self, event: VkBotMessageEvent) -> ContextType:
+        """
+            При получении геопозиции вызвается этот метод
+        :param event: Событие полученное от лонгпулла
+        """
+
+        LOGGER.debug('Сообщение с геопозицией')
+
+        # Широта и долгота места, отправленного пользователем
         latitude: float = event.obj.geo['coordinates']['latitude']
         longitude: float = event.obj.geo['coordinates']['longitude']
-        tmp_nearest_stations: list[BusStationItem, tuple[float, float]] = \
+
+        # Ближайшие к пользователю остановки
+        tmp_nearest_stations: List[BusStationItem, Tuple[float]] = \
             self.__spider.stations.all_stations_by_coords(
                 (latitude, longitude),
-                config.max_distance_to_nearest_stations_meters,
+                config.MAX_DISTANCE_TO_NEAREST_STATIONS_METERS,
                 with_distance=True, sort=True
             )
         nearest_stations = {}
@@ -96,7 +140,7 @@ class Menu:
             for station_name in nearest_stations:
                 station = nearest_stations[station_name]
                 btn_text = station_name
-                if station['distance'] <= config.min_radius:
+                if station['distance'] <= config.MIN_RADIUS:
                     btn_color = VkKeyboardColor.POSITIVE
                 else:
                     btn_color = VkKeyboardColor.NEGATIVE
@@ -113,7 +157,7 @@ class Menu:
                 )
                 keyboard.add_line()
 
-            context['message'] = config.message_for_first_station_selection
+            context['message'] = config.MESSAGE_FOR_FIRST_STATION_SELECTION
             context['keyboard'] = keyboard
         else:
             context['message'] = 'Рядом нет остановок'
@@ -121,27 +165,44 @@ class Menu:
         return context
 
     @show_elapsed_time('Обработка payload')
-    def got_message_with_payload(self, event: VkBotMessageEvent) -> dict:
+    def got_message_with_payload(
+            self, event: VkBotMessageEvent) -> ContextType:
+        """
+            Вызывается, когда пользователь нажал на какую-либо кнопку у бота
+        :param event: Событие полученное от лонгпулла
+        """
         payload: dict = json.loads(event.obj.payload)
         hash_function = payload['type']
         if hash_function == 'main_menu':
             hash_function = hash_func(self.get_main_menu_page)
         elif hash_function == 'pass':
             return {}
-        context = self.__getattribute__(payload_handlers[hash_function])(event)
+        context = self.__getattribute__(PAYLOAD_HANDLERS[hash_function])(event)
         return context
 
     @context_handler()
-    def got_unknown_message(self, event):
+    def got_unknown_message(self, event: VkBotMessageEvent) -> ContextType:
+        """
+            Вызывается при получении неизвестной команды
+        :param event: Событие полученное от лонгпулла
+        :return: Возвращает context для отправки пользователю
+        """
         context = {
-            'message': config.unknown_command,
+            'message': config.UNKNOWN_COMMAND,
             'peer_id': event.obj.from_id
         }
         return context
 
     @context_handler(add_menu_button=True)
     @payload_handler
-    def get_second_stations_page(self, event):
+    def get_second_stations_page(
+            self, event: VkBotMessageEvent) -> ContextType:
+        """
+            Обрабатывает выбор станции, следующей после необходимой,
+            метод нужен для однозначного определения станции, для которой
+            нужно будет получить расписание
+        :param event: Событие, полученное от лонгпулла
+        """
         payload = json.loads(event.obj.payload)
         keyboard = VkKeyboard()
         # TODO
@@ -152,7 +213,8 @@ class Menu:
         if payload['data']['next_stations']:
             for sid in payload['data']['next_stations']:
                 for next_station in payload['data']['next_stations'][sid]:
-                    if next_station in next_stations_names:
+                    if next_station.casefold() in \
+                            map(str.casefold, next_stations_names):
                         continue
                     btn_text = next_station
                     next_stations_names.append(next_station)
@@ -171,6 +233,8 @@ class Menu:
                     )
                     keyboard.add_line()
         else:
+            # TODO доделать, это не будет рабоать, т.к payload['data']['sid']
+            # не существует
             keyboard.add_button(
                 'Конечная', VkKeyboardColor.POSITIVE, payload={
                     'type': hash_func(self.get_schedule_for_station_page),
@@ -188,18 +252,14 @@ class Menu:
 
     @context_handler(add_menu_button=True)
     @payload_handler
-    def get_schedule_for_station_page(self, event):
+    def get_schedule_for_station_page(
+            self, event: VkBotMessageEvent) -> ContextType:
+        """
+            Получение страницы с расписанием маршрутов
+        :param event: Событие, полученное от лонгпулла
+        """
         payload = json.loads(event.obj.payload)
         cursor = self.__spider.db_session()
-        cursor.add(
-            UsersActions(
-                peer_id=event.obj.from_id,
-                action_type='got_schedule',
-                data={
-                    'sid': payload['data']['sid']
-                }
-            )
-        )
         popular_stations_table = cursor.query(PopularStations)
         current_station = popular_stations_table.filter(
             PopularStations.sid == payload['data']['sid']
@@ -241,8 +301,8 @@ class Menu:
                 route_name: str = sch['route_name']
                 arrival_time: int = sch['arrival_time']
                 max_distance_to_station: float = \
-                    arrival_time * config.man_speed_meters_per_minute
-                max_distance_to_station += config.man_speed_meters_per_minute/2
+                    arrival_time * config.MAN_SPEED_METERS_PER_MINUTE
+                max_distance_to_station += config.MAN_SPEED_METERS_PER_MINUTE/2
                 if distance_to_station is None:
                     have_time_to_station = True
                 else:
@@ -272,9 +332,9 @@ class Menu:
             'Обновить', VkKeyboardColor.PRIMARY, payload
         )
         if distance_to_station is None:
-            message = config.message_for_station_schedule_without_distance
+            message = config.MESSAGE_FOR_STATION_SCHEDULE_WITHOUT_DISTANCE
         else:
-            message = config.message_for_station_schedule
+            message = config.MESSAGE_FOR_STATION_SCHEDULE
         context = {
             'message': message,
             'keyboard': keyboard,
@@ -284,7 +344,11 @@ class Menu:
 
     @context_handler()
     @payload_handler
-    def get_main_menu_page(self, event):
+    def get_main_menu_page(self, event: VkBotMessageEvent) -> ContextType:
+        """
+            Страница с главным меню
+        :param event: Событие, полученное от лонгпулла
+        """
         keyboard = VkKeyboard()
         keyboard.add_button(
             'Последние остановки', VkKeyboardColor.POSITIVE,
@@ -319,7 +383,13 @@ class Menu:
 
     @context_handler(add_menu_button=True)
     @payload_handler
-    def get_recent_stations_page(self, event):
+    def get_recent_stations_page(
+            self, event: VkBotMessageEvent) -> ContextType:
+        """
+            Страница с последними остановками, расписание которых
+            запрашивал пользователь
+        :param event: Событие, полученное от лонгпулла
+        """
         cursor = self.__spider.db_session()
         recent_stations_table = cursor.query(RecentStations)
         current_user = recent_stations_table.filter(
@@ -356,7 +426,11 @@ class Menu:
 
     @context_handler(add_menu_button=True)
     @payload_handler
-    def get_popular_stations(self, event):
+    def get_popular_stations(self, event: VkBotMessageEvent) -> ContextType:
+        """
+            Страница с самыми популярными остановками(всех пользователей)
+        :param event: Событие, полученное от лонгпулла
+        """
         cursor = self.__spider.db_session()
         popular_stations_table = cursor.query(PopularStations)
         popular_stations = popular_stations_table.order_by(
@@ -393,10 +467,13 @@ class Menu:
 
     @context_handler(add_menu_button=True)
     @payload_handler
-    def get_about_us_page(self, event):
+    def get_about_us_page(self, event: VkBotMessageEvent) -> ContextType:
+        """
+            Страница с информацие о разработчике
+        :param event: Событие, полученное от лонгпулла
+        """
         context = {
-            'message': config.about_us_message,
+            'message': config.ABOUT_US_MESSAGE,
             'peer_id': event.obj.from_id,
         }
         return context
-
