@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Union, Optional, List, Tuple
+from typing import Union, Optional, List, Tuple, NoReturn
 
 import bs4
 import requests
@@ -31,7 +31,7 @@ class BusRoutes:
         self._all_stations = all_stations
         LOGGER.info('%s успешно инициализирован', self.__class__.__name__)
 
-    def append(self, rid: str) -> None:
+    def append(self, rid: str) -> NoReturn:
         """
             Добавляет автобсную остановку в список всех остановок
         :param rid: Уникальный идентификатор остановки
@@ -40,7 +40,7 @@ class BusRoutes:
             bus_route = BusRouteItem(rid, self._all_stations)
             self._bus_routes.append(bus_route)
 
-    def remove(self, rid: str) -> None:
+    def remove(self, rid: str) -> NoReturn:
         """
             Удаляет автобусную остановку из списка всех остановок
         :param rid: Уникальный идентификатор остановки
@@ -50,8 +50,9 @@ class BusRoutes:
         except IndexError:
             pass
         else:
+            for station in self[rid].stations:
+                station.remove_route(self[rid])
             self._bus_routes.pop(remove_index)
-            # TODO удалить из "моих" станций
 
     def get_all(self) -> List[BusRouteItem]:
         """
@@ -132,7 +133,7 @@ class BusRouteItem:
         ).start()
         LOGGER.info('%s(rid=%s) инициализирован', self.__class__.__name__, rid)
 
-    def download_page_by_rid(self, rid: str) -> None:
+    def download_page_by_rid(self, rid: str) -> NoReturn:
         """
             Загрузка страницы, с которой будет парситься информация о маршруте
         :param rid: Уникальный идентификатор маршрута
@@ -209,7 +210,7 @@ class BusRouteItem:
         return self.__my_stations
 
     def append_my_station(
-            self, station: stations_module.BusStationItem) -> None:
+            self, station: stations_module.BusStationItem) -> NoReturn:
         """
             Добавляет остановку в список остановок,
             через которые проезжает маршрут
@@ -218,7 +219,7 @@ class BusRouteItem:
         self.__my_stations.append(station)
 
     def remove_my_station(
-            self, station: stations_module.BusStationItem) -> None:
+            self, station: stations_module.BusStationItem) -> NoReturn:
         """
             Удаляет остановку из списка остановок,
             через которые проезжает маршрут

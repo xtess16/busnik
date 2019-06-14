@@ -27,6 +27,7 @@ while True:
         BOT.longpoll_listen()
     except KeyboardInterrupt:
         session.close_all_sessions()
+        print('\nЗавершено')
         break
     except Exception:
         print(traceback.format_exc())

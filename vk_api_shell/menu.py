@@ -8,7 +8,7 @@ import json
 import logging
 import time
 from functools import wraps
-from typing import Optional, Any, Dict, List, Tuple, Callable
+from typing import Optional, Any, Dict, List, Tuple, Callable, Union
 
 from vk_api.bot_longpoll import VkBotMessageEvent
 from vk_api.keyboard import VkKeyboardColor, VkKeyboard
@@ -63,7 +63,7 @@ def payload_handler(func: Callable) -> Callable:
     return wrapper
 
 
-def context_handler(add_menu_button=False):
+def context_handler(add_menu_button=False) -> Callable:
     """
         Декоратор, производит необходимые операции с результатами работы
         функций, которые возвращают context для отсылки vk api
@@ -113,27 +113,41 @@ class Menu:
 
         LOGGER.debug('Сообщение с геопозицией')
 
+        def _get_nearest_stations(
+                coords: Tuple[float, float], radius: Union[float, int]) -> \
+                Dict[str, Dict[str, Union[int, List[str]]]]:
+            """
+                Получение ближайших, к заданной точке, остановок
+            :param coords: Широта и долгота
+            :param radius: Радиус поиска остановки
+            :return: Словарь, в котором ключ - название остановки, а
+                значение словарь состоящий из дистанции до остановки и словаря,
+                в котором ключ - уникальный идентификатор остановки,
+                а значение - список имен последующих остановок
+            """
+            # Ближайшие к пользователю остановки
+            tmp_nearest_stations: List[BusStationItem, Tuple[float, float]] = \
+                self.__spider.stations.all_stations_by_coords(
+                    coords, radius, with_distance=True, sort=True
+                )
+            res = {}
+            # TODO добавить обработку конечной станции
+            for station_item, distance in tmp_nearest_stations:
+                res.setdefault(station_item.name, {
+                    'sids': [],
+                })
+                res[station_item.name]['sids'].append(station_item.sid)
+                res[station_item.name]['distance'] = distance
+            return res
+
         # Широта и долгота места, отправленного пользователем
         latitude: float = event.obj.geo['coordinates']['latitude']
         longitude: float = event.obj.geo['coordinates']['longitude']
 
-        # Ближайшие к пользователю остановки
-        tmp_nearest_stations: List[BusStationItem, Tuple[float]] = \
-            self.__spider.stations.all_stations_by_coords(
-                (latitude, longitude),
-                config.MAX_DISTANCE_TO_NEAREST_STATIONS_METERS,
-                with_distance=True, sort=True
-            )
-        nearest_stations = {}
-        # TODO добавить обработку конечной станции
-        for station, distance in tmp_nearest_stations:
-            nearest_stations.setdefault(station.name, {
-                'sids': {},
-            })
-            nearest_stations[station.name]['sids'][station.sid] = \
-                [x.name for x in station.next_stations]
-            nearest_stations[station.name]['distance'] = distance
-
+        nearest_stations = _get_nearest_stations(
+            (latitude, longitude),
+            config.MAX_DISTANCE_TO_NEAREST_STATIONS_METERS
+        )
         context = {}
         if nearest_stations:
             keyboard = VkKeyboard()
@@ -148,7 +162,7 @@ class Menu:
                 btn_payload = {
                     'type': hash_func(self.get_second_stations_page),
                     'data': {
-                        'next_stations': station['sids'],
+                        'nearest_stations': station['sids'],
                         'distance': station['distance']
                     }
                 }
@@ -203,6 +217,7 @@ class Menu:
             нужно будет получить расписание
         :param event: Событие, полученное от лонгпулла
         """
+
         payload = json.loads(event.obj.payload)
         keyboard = VkKeyboard()
         # TODO
@@ -210,39 +225,29 @@ class Menu:
         #     i['sids'] for i in payload['data']['next_stations']['sids']
         # ])
         next_stations_names = []
-        if payload['data']['next_stations']:
-            for sid in payload['data']['next_stations']:
-                for next_station in payload['data']['next_stations'][sid]:
-                    if next_station.casefold() in \
-                            map(str.casefold, next_stations_names):
-                        continue
-                    btn_text = next_station
-                    next_stations_names.append(next_station)
-                    btn_color = VkKeyboardColor.POSITIVE
-                    btn_payload = {
-                        'type': hash_func(
-                            self.get_schedule_for_station_page
-                        ),
-                        'data': {
-                            'sid': sid,
-                            'distance': payload['data']['distance']
-                        }
-                    }
-                    keyboard.add_button(
-                        btn_text, btn_color, btn_payload
-                    )
-                    keyboard.add_line()
-        else:
-            # TODO доделать, это не будет рабоать, т.к payload['data']['sid']
-            # не существует
-            keyboard.add_button(
-                'Конечная', VkKeyboardColor.POSITIVE, payload={
-                    'type': hash_func(self.get_schedule_for_station_page),
+        nearest_stations_sids = payload['data']['nearest_stations']
+        for sid in nearest_stations_sids:
+            near_station = self.__spider.stations[sid]
+            for next_station in near_station.next_stations:
+                if next_station.name.casefold() in \
+                        map(str.casefold, next_stations_names):
+                    continue
+                btn_text = next_station.name
+                next_stations_names.append(next_station.name)
+                btn_color = VkKeyboardColor.POSITIVE
+                btn_payload = {
+                    'type': hash_func(
+                        self.get_schedule_for_station_page
+                    ),
                     'data': {
-                        'sid': payload['data']['sid']
+                        'sid': sid,
+                        'distance': payload['data']['distance']
                     }
-                })
-            keyboard.add_line()
+                }
+                keyboard.add_button(
+                    btn_text, btn_color, btn_payload
+                )
+                keyboard.add_line()
         context = {
             'message': 'Выберите остановку, следующую после вашей',
             'peer_id': event.obj.from_id,
@@ -291,6 +296,7 @@ class Menu:
         cursor.close()
 
         keyboard = VkKeyboard()
+        LOGGER.critical(payload['data']['sid'])
         station: BusStationItem = \
             self.__spider.stations[payload['data']['sid']]
         distance_to_station: Optional[float] = payload['data'].get('distance')
@@ -441,7 +447,7 @@ class Menu:
         if popular_stations:
             for popular_station in popular_stations:
                 keyboard.add_button(
-                    self.__spider.stations[popular_station.sid],
+                    self.__spider.stations[popular_station.sid].name,
                     VkKeyboardColor.POSITIVE,
                     payload={
                         'type': hash_func(self.get_schedule_for_station_page),

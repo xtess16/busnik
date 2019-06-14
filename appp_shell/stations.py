@@ -7,7 +7,7 @@ import csv
 import logging
 import os
 import threading
-from typing import Optional, Tuple, Union, List, Dict, Any
+from typing import Optional, Tuple, Union, List, Dict, Any, NoReturn
 
 import bs4
 import requests
@@ -74,7 +74,7 @@ class BusStations:
 
     def append_stations_by_route_page(
             self, route_page: bs4.BeautifulSoup,
-            route: Optional[routes_module.BusRouteItem] = None) -> None:
+            route: Optional[routes_module.BusRouteItem] = None) -> NoReturn:
         """
             Добавляет остановки в список всех остановок путем
             парсинга переданной в качестве аргумента страницы
@@ -189,8 +189,9 @@ class BusStations:
         stations = [station for station in self.stations if route in station]
         return stations
 
-    def all_stations_by_coords(self, coords: Tuple[float], max_distance: int,
-                               with_distance=False, sort=False) -> \
+    def all_stations_by_coords(self, coords: Tuple[float, float],
+                               max_distance: int, with_distance=False,
+                               sort=False) -> \
             Union[List[Tuple[BusStationItem, float]], List[BusStationItem]]:
         """
             Получение списка остановок и дистанций до них в определенном
@@ -216,6 +217,18 @@ class BusStations:
         if with_distance:
             return nearest_stations
         return list(map(lambda x: x[0], nearest_stations))
+
+    def all_stations_by_name(self, name: str) -> List[BusStationItem]:
+        """
+            Получение списка всех остановок по имени
+        :param name: Имя остановки
+        :return: Список остановок
+        """
+        res = []
+        for station in self.stations:
+            if station.name.casefold() == name.casefold():
+                res.append(station)
+        return res
 
     def __len__(self) -> int:
         """
@@ -298,7 +311,7 @@ class BusStationItem:
         return self._coords
 
     @coords.setter
-    def coords(self, value: Optional[Tuple[float, float]]) -> None:
+    def coords(self, value: Optional[Tuple[float, float]]):
         """
             Установка координат остановки
         :param value: Координаты, кортеж из широты и долготы
@@ -320,7 +333,7 @@ class BusStationItem:
         """
         return self._next_stations
 
-    def append_next_station(self, station: BusStationItem) -> None:
+    def append_next_station(self, station: BusStationItem) -> NoReturn:
         """
             Добавление остановки(если не было до этого)
             в список следующих остановок
@@ -329,7 +342,7 @@ class BusStationItem:
         if station not in self._next_stations:
             self._next_stations.append(station)
 
-    def remove_next_station_by_sid(self, sid: str) -> None:
+    def remove_next_station_by_sid(self, sid: str) -> NoReturn:
         """
             Удаление остановки из списка следующих остановок (по sid)
         :param sid: Уникальный идентификатор остановки
@@ -348,7 +361,7 @@ class BusStationItem:
         """
         return self._routes
 
-    def append_route(self, route: routes_module.BusRouteItem) -> None:
+    def append_route(self, route: routes_module.BusRouteItem) -> NoReturn:
         """
             Добавление маршрута в список маршрутов, проходящих
             через текущую остановку (если его там не было до этого)
@@ -357,7 +370,7 @@ class BusStationItem:
         if route not in self._routes:
             self._routes.append(route)
 
-    def remove_route(self, route: routes_module.BusRouteItem) -> None:
+    def remove_route(self, route: routes_module.BusRouteItem) -> NoReturn:
         """
             Удаляет маршрут из списка маршрутов, проходящих через
             текущую остановку
@@ -396,7 +409,7 @@ class BusStationItem:
         return schedule_table
 
     def calculate_coords_from_stations_csv(
-            self, stations_csv: Optional[List[List[Any]]]) -> None:
+            self, stations_csv: Optional[List[List[Any]]]) -> NoReturn:
         """
             Расчет координат текущей остановки исходя из csv файла,
             представленного в виде матрицы и
