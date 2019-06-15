@@ -22,6 +22,7 @@ isort==4.3.20
 jedi==0.13.3
 jeepney==0.4
 keyring==19.0.1
+keyrings.alt==3.1.1
 lazy-object-proxy==1.4.1
 mccabe==0.6.1
 mypy==0.701
