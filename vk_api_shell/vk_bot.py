@@ -54,9 +54,7 @@ class Bot:
             else:
                 LOGGER.critical(
                     'Неизвестная ошибка: %s', traceback.format_exc())
-            return False
-        except Exception:
-            LOGGER.critical('Неизвестная ошибка: %s', traceback.format_exc())
+                raise error
             return False
         else:
             LOGGER.info('Авторизован')
@@ -84,7 +82,7 @@ class Bot:
         LOGGER.debug('Новое сообщение %s', str(event))
         if event.obj.geo is not None:
             context: dict = self.__menu_handler.got_message_with_geo(event)
-        elif event.obj.payload is not None:
+        elif event.obj.payload:
             context: dict = self.__menu_handler.got_message_with_payload(event)
         else:
             context: dict = self.__menu_handler.got_unknown_message(event)

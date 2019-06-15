@@ -15,13 +15,15 @@ BOT = vk_bot.Bot(SPIDER)
 
 while True:
     TOKEN = keyring.get_password('busnik.group_token', getpass.getuser())
-    if TOKEN is None or not BOT.auth(TOKEN):
+    was_authed = BOT.auth(TOKEN)
+    if TOKEN is None or not was_authed:
         keyring.set_password(
             'busnik.group_token',
             getpass.getuser(), getpass.getpass('Group token: ')
         )
     else:
         break
+
 while True:
     try:
         BOT.longpoll_listen()

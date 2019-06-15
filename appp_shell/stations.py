@@ -85,74 +85,104 @@ class BusStations:
             маршрут проезжает через все эти остановки
         """
 
-        # Селектор для выбора каждой остановки на странице
-        css = 'fieldset a[href*="page=forecasts"]'
-        stations = []
-        self.__append_stations_locker.acquire()
-        cursor = self.__session()
-        try:
+        def _get_stations_by_route_page(page: bs4.BeautifulSoup) -> \
+                List[Dict[str, str]]:
+            """
+                Получение остановок из html страницы
+            :param page: html страница, с которой парсятся остановки
+            :return: Список остановок(словарей)
+            """
+            # Селектор для выбора каждой остановки на странице
+            css = 'fieldset a[href*="page=forecasts"]'
+            _stations = []
+            # Тут содержится имя предыдущей остановки, нужно для того, чтобы
+            # избежать добавлений несколько одинаковых остановок подряд
+            prev_name = None
             # Проходим по всем остановкам на странице
-            for station_html in route_page.select(css):
+            for station_html in page.select(css):
                 # Извлекаем из ссылки на остановку уникальный идентификатор
                 # sid (station id)
-                sid = config.REG_EXPR_FOR_STID.search(
+                station_html_sid = config.REG_EXPR_FOR_STID.search(
                     station_html['href']).groups()[0]
                 # Парсим имя и приводим его к форме, необходимой для
                 # дальнейшего получения координат этой остановки.
                 # Это связано с тем, что название остановок в csv файле с
                 # координатами остановок частично не совпадает с названиями
                 # которые мы парсим с сайта
-                name = station_html.text.strip()
-                name = config.replace_station_name(name)
-                # Добавляет в самый конец None, для того чтобы реализовать
-                # возможность получения следующей остановки от текущей.
-                # Каждый i-ый элемент списка остановок будет иметь в качестве
-                # следующей остановки элемент i+1, последний элемент
-                # в качестве следующей остановки будет принимать None
-                if stations and stations[-1] and name == stations[-1]['name']:
-                    stations.append(None)
+                station_html_name = config.replace_station_name(
+                    station_html.text.strip())
+                # Пропускаем остановку, если ее имя такое же
+                # как и у предыдущей
+                if prev_name is not None and prev_name == station_html_name:
                     continue
-                stations.append({
-                    'sid': sid,
-                    'name': name
+                _stations.append({
+                    'sid': station_html_sid,
+                    'name': station_html_name,
+                    'href': station_html['href']
                 })
-                # Если станции нет в списке станций
-                if sid not in self:
-                    coords = cursor.query(
-                        StationsCoord.latitude, StationsCoord.longitude
-                    ).filter(StationsCoord.sid == sid).one_or_none()
-                    station_item = \
-                        BusStationItem(
-                            link=config.STATION_LINK.format(
-                                station_html['href']),
-                            name=name,
-                            coords=coords
+                prev_name = station_html_name
+            return _stations
+
+        self.__append_stations_locker.acquire()
+        cursor = self.__session()
+        stations = _get_stations_by_route_page(route_page)
+        try:
+            for station in stations:
+                _sid = station['sid']
+                _name = station['name']
+                _href = station['href']
+                # Если остановки нет в списке остановок, добавляем
+                if _sid not in self:
+                    db_station = cursor.query(StationsCoord).filter(
+                        StationsCoord.sid == _sid
+                    ).one_or_none()
+                    # Если этой остановки нет в БД таблице остановок
+                    # с координатами, то создаем остановку и передаем
+                    # координаты = None, если при создании остановки
+                    # передать координаты = None, класс попытается получить
+                    # координаты остановки из csv файла
+                    if db_station is None:
+                        station_item = BusStationItem(
+                            link=config.STATION_LINK.format(_href),
+                            name=_name, coords=None
                         )
-                    station_db = cursor.query(StationsCoord).filter(
-                        StationsCoord.sid == sid).one_or_none()
-                    if station_db is not None:
-                        station_db.latitude, station_db.longitude = \
-                            station_item.coords
-                    elif station_item.coords is not None:
-                        cursor.add(
-                            StationsCoord(name, sid, *station_item.coords)
+                        # Если координаты нашлись в csv файле
+                        # то добавляем остановку в БД таблицу остановок с
+                        # координатами, после перезапуска программы,
+                        # координаты будут находиться быстрее
+                        # из-за ненадобности копаться в csv файле
+                        if station_item.coords is not None:
+                            cursor.add(StationsCoord(
+                                _name, _sid, *station_item.coords
+                            ))
+                    # Иначе, берем координаты из таблицы и создаем остановку
+                    # с этими координатами
+                    else:
+                        coords = (db_station.latitude, db_station.longitude)
+                        station_item = BusStationItem(
+                            link=config.STATION_LINK.format(_href),
+                            name=_name, coords=coords
                         )
-                    cursor.commit()
-                    if route is not None:
-                        station_item.append_route(route)
-                        route.append_my_station(station_item)
+                    # Добавляем остановку в список всех остановок
                     self._bus_stations.append(station_item)
-                else:
-                    self[sid].append_route(route)
-                    route.append_my_station(self[sid])
+                # Если маршрут был передан аргументом, то добавляем этот
+                # маршрут в список маршрутов, которые проходят через
+                # остановку и добавляет остановку маршруту в список
+                # остановок через которые он проходит
+                if route is not None:
+                    self[_sid].append_route(route)
+                    route.append_my_station(self[_sid])
+            # i-ой остановке добавляем в список следующих остановок
+            # остановку i+1
             for i in range(len(stations)-1):
-                if stations[i] is not None and stations[i+1] is not None:
-                    sid = stations[i]['sid']
-                    next_station_sid = stations[i+1]['sid']
-                    self[sid].append_next_station(self[next_station_sid])
+                sid = stations[i]['sid']
+                next_station_sid = stations[i+1]['sid']
+                self[sid].append_next_station(self[next_station_sid])
         except Exception as error:
             cursor.rollback()
             raise error
+        else:
+            cursor.commit()
         finally:
             self.__append_stations_locker.release()
             cursor.close()

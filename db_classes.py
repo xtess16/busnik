@@ -62,7 +62,7 @@ class RecentStations(Base):
         """
             Инициализатор
         :param peer_id: id пользователя
-        :param stations: Список остановок
+        :param stations: Список имен остановок
         """
         self.peer_id = peer_id
         self.stations = stations
@@ -72,19 +72,17 @@ class RecentStations(Base):
             self.__class__.__name__, self.peer_id, self.stations
         )
 
-    def add(self, sid: str) -> None:
+    def add(self, name: str) -> None:
         """
             Добавляет остановку в список последних, при этом,
             убирая самую старую
-        :param sid: Уникальный идентификатор остановки
+        :param name: Имя остановки
         """
         tmp_stations = self.stations[:]
-        if sid in tmp_stations:
-            tmp_stations.remove(sid)
-        tmp_stations.append(sid)
-        if len(tmp_stations) > 10:
-            tmp_stations.pop(0)
-        self.stations = tmp_stations
+        if name in tmp_stations:
+            tmp_stations.remove(name)
+        tmp_stations.append(name)
+        self.stations = tmp_stations[-5:]
 
 
 class PopularStations(Base):
@@ -95,16 +93,16 @@ class PopularStations(Base):
     """
     __tablename__ = 'popular_stations'
     id = Column(Integer, primary_key=True)
-    sid = Column(String(5))
+    name = Column(String)
     call_count = Column(Integer)
 
-    def __init__(self, sid: str, call_count: int):
+    def __init__(self, name: str, call_count: int):
         """
             Инициализатор
-        :param sid: Уникальный идентификатор остановки
+        :param name: Имя остановки
         :param call_count: Количество вызовов
         """
-        self.sid = sid
+        self.name = name
         self.call_count = call_count
 
     def __repr__(self):

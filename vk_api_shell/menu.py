@@ -8,7 +8,7 @@ import json
 import logging
 import time
 from functools import wraps
-from typing import Optional, Any, Dict, List, Tuple, Callable, Union
+from typing import Optional, Any, Dict, List, Tuple, Callable, Union, NoReturn
 
 from vk_api.bot_longpoll import VkBotMessageEvent
 from vk_api.keyboard import VkKeyboardColor, VkKeyboard
@@ -131,7 +131,6 @@ class Menu:
                     coords, radius, with_distance=True, sort=True
                 )
             res = {}
-            # TODO добавить обработку конечной станции
             for station_item, distance in tmp_nearest_stations:
                 res.setdefault(station_item.name, {
                     'sids': [],
@@ -149,8 +148,8 @@ class Menu:
             config.MAX_DISTANCE_TO_NEAREST_STATIONS_METERS
         )
         context = {}
+        keyboard = VkKeyboard()
         if nearest_stations:
-            keyboard = VkKeyboard()
             for station_name in nearest_stations:
                 station = nearest_stations[station_name]
                 btn_text = station_name
@@ -171,10 +170,13 @@ class Menu:
                 )
                 keyboard.add_line()
 
-            context['message'] = config.MESSAGE_FOR_FIRST_STATION_SELECTION
-            context['keyboard'] = keyboard
         else:
-            context['message'] = 'Рядом нет остановок'
+            keyboard.add_button(
+                'Рядом нет остановок', VkKeyboardColor.NEGATIVE
+            )
+            keyboard.add_line()
+        context['message'] = config.MESSAGE_FOR_FIRST_STATION_SELECTION
+        context['keyboard'] = keyboard
         context['peer_id'] = event.obj.from_id
         return context
 
@@ -186,10 +188,10 @@ class Menu:
         :param event: Событие полученное от лонгпулла
         """
         payload: dict = json.loads(event.obj.payload)
-        hash_function = payload['type']
+        hash_function = payload.get('type')
         if hash_function == 'main_menu':
             hash_function = hash_func(self.get_main_menu_page)
-        elif hash_function == 'pass':
+        elif hash_function == 'pass' or hash_function is None:
             return {}
         context = self.__getattribute__(PAYLOAD_HANDLERS[hash_function])(event)
         return context
@@ -220,20 +222,17 @@ class Menu:
 
         payload = json.loads(event.obj.payload)
         keyboard = VkKeyboard()
-        # TODO
-        # have_last_station = all([
-        #     i['sids'] for i in payload['data']['next_stations']['sids']
-        # ])
         next_stations_names = []
         nearest_stations_sids = payload['data']['nearest_stations']
         for sid in nearest_stations_sids:
             near_station = self.__spider.stations[sid]
+            if not near_station.next_stations:
+                continue
             for next_station in near_station.next_stations:
-                if next_station.name.casefold() in \
-                        map(str.casefold, next_stations_names):
+                if next_station.name.casefold() in next_stations_names:
                     continue
+                next_stations_names.append(next_station.name.casefold())
                 btn_text = next_station.name
-                next_stations_names.append(next_station.name)
                 btn_color = VkKeyboardColor.POSITIVE
                 btn_payload = {
                     'type': hash_func(
@@ -241,7 +240,7 @@ class Menu:
                     ),
                     'data': {
                         'sid': sid,
-                        'distance': payload['data']['distance']
+                        'distance': payload['data'].get('distance')
                     }
                 }
                 keyboard.add_button(
@@ -263,69 +262,101 @@ class Menu:
             Получение страницы с расписанием маршрутов
         :param event: Событие, полученное от лонгпулла
         """
-        payload = json.loads(event.obj.payload)
-        cursor = self.__spider.db_session()
-        popular_stations_table = cursor.query(PopularStations)
-        current_station = popular_stations_table.filter(
-            PopularStations.sid == payload['data']['sid']
-        ).one_or_none()
-        if current_station is None:
-            cursor.add(
-                PopularStations(
-                    sid=payload['data']['sid'],
-                    call_count=1
-                )
-            )
-        else:
-            current_station.call_count += 1
+        def _update_stations_tables(peer_id: int, sid: str) -> NoReturn:
+            """
+                Апдейдит таблицу недавних остановок пользователя и таблицу
+                самых популярных остановок
+            :param peer_id: Уникальный идентификатор пользователя
+            :param sid: Уникальный идентификатор остановки
+            """
+            station_name = self.__spider.stations[sid].name
+            cursor = self.__spider.db_session()
+            try:
+                popular_stations_table = cursor.query(PopularStations)
+                current_station_in_popular_stations = \
+                    popular_stations_table.filter(
+                        PopularStations.name == station_name
+                    ).one_or_none()
+                if current_station_in_popular_stations is None:
+                    cursor.add(
+                        PopularStations(name=station_name, call_count=1)
+                    )
+                else:
+                    current_station_in_popular_stations.call_count += 1
 
-        recent_stations_table = cursor.query(RecentStations)
-        current_user_recent_stations = recent_stations_table.filter(
-            RecentStations.peer_id == event.obj.from_id
-        ).one_or_none()
-        if current_user_recent_stations is None:
-            cursor.add(
-                RecentStations(
-                    peer_id=event.obj.from_id,
-                    stations=[payload['data']['sid'], ]
-                )
-            )
-        else:
-            current_user_recent_stations.add(payload['data']['sid'])
-        cursor.commit()
-        cursor.close()
+                recent_stations_table = cursor.query(RecentStations)
+                current_user_in_recent_stations = recent_stations_table.filter(
+                    RecentStations.peer_id == peer_id
+                ).one_or_none()
+                if current_user_in_recent_stations is None:
+                    cursor.add(
+                        RecentStations(
+                            peer_id=peer_id,
+                            stations=[station_name, ]
+                        )
+                    )
+                else:
+                    current_user_in_recent_stations.add(station_name)
+            except Exception as error:
+                cursor.rollback()
+                raise error
+            else:
+                cursor.commit()
+            finally:
+                cursor.close()
+
+        payload = json.loads(event.obj.payload)
+        _update_stations_tables(event.obj.from_id, payload['data']['sid'])
 
         keyboard = VkKeyboard()
-        LOGGER.critical(payload['data']['sid'])
         station: BusStationItem = \
             self.__spider.stations[payload['data']['sid']]
         distance_to_station: Optional[float] = payload['data'].get('distance')
-        schedule: list = station.schedule
+        schedule: List[Dict[str, Any]] = station.schedule
+        # Если расписание не пустое
         if schedule:
+            # Для того, чтобы каждые 2 кнопки были на новой линии
             btn_count = 0
+            # Максимум 18 маршрутов
+            # и 1 линия для кнопок "Обновить" и "Главное меню",
+            # иначе будет неверный формат кливиатуры(ограничение вк апи)
             for sch in schedule[:18]:
                 route_name: str = sch['route_name']
                 arrival_time: int = sch['arrival_time']
-                max_distance_to_station: float = \
+                # Рассчет максимальной дистанции,
+                # которую пользователь может пройти за то время,
+                # пока маршрут подъезжает к остановке
+                max_distance: float = \
                     arrival_time * config.MAN_SPEED_METERS_PER_MINUTE
-                max_distance_to_station += config.MAN_SPEED_METERS_PER_MINUTE/2
+                max_distance += config.MAN_SPEED_METERS_PER_MINUTE
+                # Дистанция может не существовать в том случае, если человек
+                # перешел в расписание не через свои координаты, а через
+                # "Недавние остановки" или "Популярные остановки"
                 if distance_to_station is None:
-                    have_time_to_station = True
+                    # Если дистанция не указана, будет считаться что
+                    # пользователь успевает дойти
+                    have_time = True
                 else:
-                    have_time_to_station: bool = \
-                        max_distance_to_station >= distance_to_station
+                    # Если дистанция указана, высчитывается, успевает ли
+                    # пользователь дойти до остановки за то время,
+                    # пока едет маршрут
+                    have_time = max_distance >= distance_to_station
                 btn_text = f'№{route_name} через {arrival_time} мин'
-                if have_time_to_station:
+                # Если пользователь успевает дойти до остановки, до того
+                # как маршрут приедет, то кнопка будет зеленой, иначе красной
+                if have_time:
                     btn_color = VkKeyboardColor.POSITIVE
                 else:
                     btn_color = VkKeyboardColor.NEGATIVE
-                btn_payload: dict = {}
                 keyboard.add_button(
-                    btn_text, btn_color, btn_payload
+                    btn_text, btn_color
                 )
                 btn_count += 1
+                # По 2 кнопки на линию
                 if btn_count % 2 == 0:
                     keyboard.add_line()
+            # Сделано для того, чтобы кнопки "Обновить" и "Главное меню" были
+            # всегда в отдельной строке
             if btn_count % 2 != 0:
                 keyboard.add_line()
 
@@ -401,6 +432,7 @@ class Menu:
         current_user = recent_stations_table.filter(
             RecentStations.peer_id == event.obj.from_id
         ).one_or_none()
+        cursor.close()
         keyboard = VkKeyboard()
         if current_user is None:
             keyboard.add_button(
@@ -409,20 +441,22 @@ class Menu:
             )
             keyboard.add_line()
         else:
-            recent_stations = current_user.stations
-            for station in recent_stations[::-1]:
+            recent_stations_names = current_user.stations
+            for station_name in recent_stations_names[::-1]:
+                stations_with_same_names = \
+                    self.__spider.stations.all_stations_by_name(station_name)
+                stations_sids = [s.sid for s in stations_with_same_names]
                 keyboard.add_button(
-                    self.__spider.stations[station].name,
+                    station_name,
                     VkKeyboardColor.POSITIVE,
                     payload={
-                        'type': hash_func(self.get_schedule_for_station_page),
+                        'type': hash_func(self.get_second_stations_page),
                         'data': {
-                            'sid': station
+                            'nearest_stations': stations_sids
                         }
                     }
                 )
                 keyboard.add_line()
-        cursor.close()
         context = {
             'message': 'Ваши последние остановки',
             'keyboard': keyboard,
@@ -440,19 +474,23 @@ class Menu:
         cursor = self.__spider.db_session()
         popular_stations_table = cursor.query(PopularStations)
         popular_stations = popular_stations_table.order_by(
-            PopularStations.call_count
-        )[-5:]
-
+            PopularStations.call_count.desc()
+        )[:5]
+        cursor.close()
         keyboard = VkKeyboard()
         if popular_stations:
             for popular_station in popular_stations:
+                station_name = popular_station.name
+                stations_with_same_name = \
+                    self.__spider.stations.all_stations_by_name(station_name)
+                stations_sids = [s.sid for s in stations_with_same_name]
                 keyboard.add_button(
-                    self.__spider.stations[popular_station.sid].name,
+                    station_name,
                     VkKeyboardColor.POSITIVE,
                     payload={
-                        'type': hash_func(self.get_schedule_for_station_page),
+                        'type': hash_func(self.get_second_stations_page),
                         'data': {
-                            'sid': popular_station.sid
+                            'nearest_stations': stations_sids
                         }
                     }
                 )
@@ -463,7 +501,6 @@ class Menu:
                 VkKeyboardColor.POSITIVE
             )
             keyboard.add_line()
-        cursor.close()
         context = {
             'message': 'Популярные остановки',
             'keyboard': keyboard,
